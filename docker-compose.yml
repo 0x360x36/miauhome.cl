@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:18
+    container_name: miauhome_db
+    restart: always
+    environment:
+      POSTGRES_USER: miaudmin
+      POSTGRES_PASSWORD: miauword
+      POSTGRES_DB: miauhomedata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/
+
+volumes:
+  postgres_data:
