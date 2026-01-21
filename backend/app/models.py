@@ -9,6 +9,7 @@ class User(Base):
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     full_name = Column(String)
+    google_id = Column(String, unique=True, nullable=True)
     is_active = Column(Boolean, default=True)
 
 class Product(Base):
@@ -32,3 +33,22 @@ class Order(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     user = relationship("User")
+
+class Cart(Base):
+    __tablename__ = "carts"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    user = relationship("User")
+    items = relationship("CartItem", back_populates="cart")
+
+class CartItem(Base):
+    __tablename__ = "cart_items"
+    id = Column(Integer, primary_key=True, index=True)
+    cart_id = Column(Integer, ForeignKey("carts.id"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    quantity = Column(Integer, default=1)
+
+    cart = relationship("Cart", back_populates="items")
+    product = relationship("Product")

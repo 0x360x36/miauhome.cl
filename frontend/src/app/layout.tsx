@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { GoogleOAuthProvider } from "@react-oauth/google";
+import { CartProvider } from "@/context/CartContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -17,6 +19,8 @@ export const metadata: Metadata = {
   description: "La mejor tienda online para consentir a tu felino.",
 };
 
+const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID"; // Replace with env var in production
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -27,7 +31,11 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+          <CartProvider>
+            {children}
+          </CartProvider>
+        </GoogleOAuthProvider>
       </body>
     </html>
   );

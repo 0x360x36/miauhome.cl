@@ -1,13 +1,27 @@
+"use client";
+
 import Image from 'next/image';
 import { ShoppingCart, Star } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Product } from '@/data/products';
+import { useCart } from '@/context/CartContext';
 
 interface ProductCardProps {
   product: Product;
 }
 
 export function ProductCard({ product }: ProductCardProps) {
+  const { addToCart } = useCart();
+
+  const handleAddToCart = () => {
+    addToCart({
+      id: parseInt(product.id), // Backend expects number
+      name: product.name,
+      price: product.price,
+      image_url: product.image
+    });
+  };
+
   return (
     <div className="group relative flex flex-col overflow-hidden rounded-2xl border bg-white shadow-sm transition-all hover:shadow-lg">
       <div className="relative aspect-square overflow-hidden bg-gray-100">
@@ -36,7 +50,7 @@ export function ProductCard({ product }: ProductCardProps) {
           <span className="text-xl font-bold text-primary">
             ${product.price.toLocaleString('es-CL')}
           </span>
-          <Button size="sm" className="rounded-full h-9 w-9 p-0">
+          <Button size="sm" className="rounded-full h-9 w-9 p-0" onClick={handleAddToCart}>
             <ShoppingCart className="h-4 w-4" />
             <span className="sr-only">Agregar</span>
           </Button>

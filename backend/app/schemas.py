@@ -19,18 +19,30 @@ class User(UserBase):
     class Config:
         orm_mode = True
 
-class ProductBase(BaseModel):
-    name: str
-    description: str
-    price: int
-    image_url: str
-    category: str
+class GoogleLogin(BaseModel):
+    token: str
 
-class Product(ProductBase):
+class CartItemBase(BaseModel):
+    product_id: int
+    quantity: int
+
+class CartItemCreate(CartItemBase):
+    pass
+
+class CartItem(CartItemBase):
     id: int
+    product: Product
 
     class Config:
         orm_mode = True
+
+class Cart(BaseModel):
+    id: int
+    items: List[CartItem] = []
+
+    class Config:
+        orm_mode = True
+
 
 class OrderCreate(BaseModel):
     total_amount: int
