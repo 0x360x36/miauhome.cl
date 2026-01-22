@@ -8,6 +8,7 @@ import uuid
 import os
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+from typing import Optional, List
 
 models.Base.metadata.create_all(bind=database.engine)
 
@@ -55,6 +56,10 @@ def google_login(login_data: schemas.GoogleLogin, db: Session = Depends(database
             db.commit()
             db.refresh(user)
             
+            # Create configuration
+            config = models.UserConfiguration(user_id=user.id)
+            db.add(config)
+            
             # Create a cart for the new user
             cart = models.Cart(user_id=user.id)
             db.add(cart)
@@ -69,6 +74,12 @@ def google_login(login_data: schemas.GoogleLogin, db: Session = Depends(database
             if not cart:
                 cart = models.Cart(user_id=user.id)
                 db.add(cart)
+                db.commit()
+            
+            # Check if user has config
+            if not user.configuration:
+                config = models.UserConfiguration(user_id=user.id)
+                db.add(config)
                 db.commit()
                 
         # Create access token
@@ -148,6 +159,9 @@ def remove_from_cart(
 @app.on_event("startup")
 def startup_event():
     db = next(database.get_db())
+    # Create tables if they don't exist
+    models.Base.metadata.create_all(bind=database.engine)
+    
     if db.query(models.Product).count() == 0:
         # Seed products matching frontend data
         products = [
@@ -171,6 +185,16 @@ def register(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+    
+    # Create configuration
+    config = models.UserConfiguration(user_id=new_user.id)
+    db.add(config)
+    
+    # Create cart
+    cart = models.Cart(user_id=new_user.id)
+    db.add(cart)
+    db.commit()
+    
     return new_user
 
 @app.post("/login")
@@ -181,12 +205,16 @@ def login(user: schemas.UserLogin, db: Session = Depends(database.get_db)):
     access_token = auth.create_access_token(data={"sub": db_user.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
-@app.get("/products", response_model=list[schemas.Product])
+@app.get("/products", response_model=List[schemas.Product])
 def get_products(db: Session = Depends(database.get_db)):
     return db.query(models.Product).all()
 
 @app.post("/checkout")
-def checkout(order_data: schemas.OrderCreate, db: Session = Depends(database.get_db)):
+def checkout(
+    order_data: schemas.OrderCreate, 
+    db: Session = Depends(database.get_db),
+    current_user: Optional[models.User] = Depends(auth.get_optional_current_user)
+):
     buy_order = str(uuid.uuid4())[:26]
     session_id = str(uuid.uuid4())[:26]
     
@@ -200,7 +228,8 @@ def checkout(order_data: schemas.OrderCreate, db: Session = Depends(database.get
         total_amount=order_data.total_amount,
         buy_order=buy_order,
         session_id=session_id,
-        token_ws=response['token']
+        token_ws=response['token'],
+        user_id=current_user.id if current_user else None
     )
     db.add(new_order)
     db.commit()
@@ -221,3 +250,146 @@ def confirm_payment(token_ws: str, db: Session = Depends(database.get_db)):
         db.commit()
     
     return response
+
+# --- New Endpoints for Account Management ---
+
+@app.get("/users/me", response_model=schemas.User)
+def read_users_me(current_user: models.User = Depends(auth.get_current_user)):
+    return current_user
+
+@app.put("/users/me/configuration", response_model=schemas.UserConfiguration)
+def update_user_configuration(
+    config_in: schemas.UserConfigurationBase,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(database.get_db)
+):
+    config = db.query(models.UserConfiguration).filter(models.UserConfiguration.user_id == current_user.id).first()
+    if not config:
+        config = models.UserConfiguration(user_id=current_user.id, **config_in.dict())
+        db.add(config)
+    else:
+        for key, value in config_in.dict().items():
+            setattr(config, key, value)
+            
+    db.commit()
+    db.refresh(config)
+    return config
+
+@app.post("/users/me/addresses", response_model=schemas.UserAddress)
+def create_user_address(
+    address_in: schemas.UserAddressCreate,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(database.get_db)
+):
+    address = models.UserAddress(user_id=current_user.id, **address_in.dict())
+    db.add(address)
+    db.commit()
+    db.refresh(address)
+    return address
+
+@app.get("/users/me/orders", response_model=List[schemas.Order])
+def get_user_orders(
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(database.get_db)
+):
+    return db.query(models.Order).filter(models.Order.user_id == current_user.id).all()
+
+# --- Admin & Support Endpoints ---
+
+def check_admin(current_user: models.User = Depends(auth.get_current_user)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+    return current_user
+
+# Admin: Manage Products
+@app.post("/products", response_model=schemas.Product)
+def create_product(
+    product: schemas.ProductCreate,
+    db: Session = Depends(database.get_db),
+    admin: models.User = Depends(check_admin)
+):
+    db_product = models.Product(**product.dict())
+    db.add(db_product)
+    db.commit()
+    db.refresh(db_product)
+    return db_product
+
+@app.put("/products/{product_id}", response_model=schemas.Product)
+def update_product(
+    product_id: int,
+    product: schemas.ProductCreate,
+    db: Session = Depends(database.get_db),
+    admin: models.User = Depends(check_admin)
+):
+    db_product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if not db_product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    for key, value in product.dict().items():
+        setattr(db_product, key, value)
+    
+    db.commit()
+    db.refresh(db_product)
+    return db_product
+
+@app.delete("/products/{product_id}")
+def delete_product(
+    product_id: int,
+    db: Session = Depends(database.get_db),
+    admin: models.User = Depends(check_admin)
+):
+    db_product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if not db_product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    db.delete(db_product)
+    db.commit()
+    return {"message": "Product deleted"}
+
+# Admin: Discounts
+@app.post("/discounts", response_model=schemas.Discount)
+def create_discount(
+    discount: schemas.DiscountCreate,
+    db: Session = Depends(database.get_db),
+    admin: models.User = Depends(check_admin)
+):
+    db_discount = models.Discount(**discount.dict())
+    db.add(db_discount)
+    db.commit()
+    db.refresh(db_discount)
+    return db_discount
+
+@app.get("/discounts", response_model=List[schemas.Discount])
+def get_discounts(
+    db: Session = Depends(database.get_db),
+    admin: models.User = Depends(check_admin)
+):
+    return db.query(models.Discount).all()
+
+# Support Tickets
+@app.post("/support", response_model=schemas.SupportTicket)
+def create_ticket(
+    ticket: schemas.SupportTicketCreate,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(database.get_db)
+):
+    db_ticket = models.SupportTicket(**ticket.dict(), user_id=current_user.id)
+    db.add(db_ticket)
+    db.commit()
+    db.refresh(db_ticket)
+    return db_ticket
+
+@app.get("/support/me", response_model=List[schemas.SupportTicket])
+def get_my_tickets(
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(database.get_db)
+):
+    return db.query(models.SupportTicket).filter(models.SupportTicket.user_id == current_user.id).all()
+
+@app.get("/support/admin", response_model=List[schemas.SupportTicket])
+def get_all_tickets(
+    db: Session = Depends(database.get_db),
+    admin: models.User = Depends(check_admin)
+):
+    return db.query(models.SupportTicket).all()
+

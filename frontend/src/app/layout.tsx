@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   description: "La mejor tienda online para consentir a tu felino.",
 };
 
-const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID"; // Replace with env var in production
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "YOUR_GOOGLE_CLIENT_ID";
 
 export default function RootLayout({
   children,
