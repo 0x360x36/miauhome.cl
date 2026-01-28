@@ -2,10 +2,24 @@ import { Navbar } from '@/components/Navbar';
 import { Hero } from '@/components/Hero';
 import { ProductCard } from '@/components/ProductCard';
 import { Footer } from '@/components/Footer';
-import { products } from '@/data/products';
 import { Button } from '@/components/ui/Button';
 
-export default function Home() {
+async function getProducts() {
+  try {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/products`, { 
+      cache: 'no-store' 
+    });
+    if (!response.ok) return [];
+    return await response.json();
+  } catch (error) {
+    console.error("Error fetching products:", error);
+    return [];
+  }
+}
+
+export default async function Home() {
+  const products = await getProducts();
+
   return (
     <div className="min-h-screen flex flex-col font-sans">
       <Navbar />

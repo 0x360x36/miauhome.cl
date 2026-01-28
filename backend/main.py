@@ -1,13 +1,11 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from . import models, schemas, auth, database
-from transbank.webpay.webpay_plus.transaction import Transaction
+import models, schemas, auth, database
 from transbank.common.integration_type import IntegrationType
+from transbank_logic import TransbankService
 import uuid
 import os
-from google.oauth2 import id_token
-from google.auth.transport import requests as google_requests
 from typing import Optional, List
 
 models.Base.metadata.create_all(bind=database.engine)
@@ -21,74 +19,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "your-google-client-id")
-
-@app.post("/auth/google")
-def google_login(login_data: schemas.GoogleLogin, db: Session = Depends(database.get_db)):
-    try:
-        # Verify the token
-        id_info = id_token.verify_oauth2_token(
-            login_data.token,
-            google_requests.Request(),
-            GOOGLE_CLIENT_ID,
-            clock_skew_in_seconds=10
-        )
-        
-        # Get user info
-        email = id_info['email']
-        google_id = id_info['sub']
-        name = id_info.get('name', '')
-        
-        # Check if user exists
-        user = db.query(models.User).filter(models.User.email == email).first()
-        
-        if not user:
-            # Create new user
-            user = models.User(
-                email=email,
-                full_name=name,
-                google_id=google_id,
-                is_active=True,
-                hashed_password=auth.get_password_hash(str(uuid.uuid4())) # Random password for google users
-            )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-            
-            # Create configuration
-            config = models.UserConfiguration(user_id=user.id)
-            db.add(config)
-            
-            # Create a cart for the new user
-            cart = models.Cart(user_id=user.id)
-            db.add(cart)
-            db.commit()
-        elif not user.google_id:
-            # Link existing user
-            user.google_id = google_id
-            db.commit()
-            
-            # Check if user has a cart
-            cart = db.query(models.Cart).filter(models.Cart.user_id == user.id).first()
-            if not cart:
-                cart = models.Cart(user_id=user.id)
-                db.add(cart)
-                db.commit()
-            
-            # Check if user has config
-            if not user.configuration:
-                config = models.UserConfiguration(user_id=user.id)
-                db.add(config)
-                db.commit()
-                
-        # Create access token
-        access_token = auth.create_access_token(data={"sub": user.email})
-        return {"access_token": access_token, "token_type": "bearer", "user": user}
-        
-    except ValueError as e:
-        # Invalid token
-        raise HTTPException(status_code=400, detail=f"Invalid Google token: {str(e)}")
 
 @app.get("/cart", response_model=schemas.Cart)
 def get_cart(current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(database.get_db)):
@@ -116,7 +46,8 @@ def add_to_cart(
     # Check if item already exists
     cart_item = db.query(models.CartItem).filter(
         models.CartItem.cart_id == cart.id,
-        models.CartItem.product_id == item_in.product_id
+        models.CartItem.product_id == item_in.product_id,
+        models.CartItem.variation_id == item_in.variation_id
     ).first()
     
     if cart_item:
@@ -125,6 +56,7 @@ def add_to_cart(
         cart_item = models.CartItem(
             cart_id=cart.id,
             product_id=item_in.product_id,
+            variation_id=item_in.variation_id,
             quantity=item_in.quantity
         )
         db.add(cart_item)
@@ -162,17 +94,76 @@ def startup_event():
     # Create tables if they don't exist
     models.Base.metadata.create_all(bind=database.engine)
     
+    # Create default admin if not exists
+    if db.query(models.User).filter(models.User.email == "admin@miauhome.cl").count() == 0:
+        admin_user = models.User(
+            email="admin@miauhome.cl",
+            hashed_password=auth.get_password_hash("admin123"),
+            first_name="Admin",
+            last_name="Miau",
+            is_admin=True
+        )
+        db.add(admin_user)
+        db.commit()
+
     if db.query(models.Product).count() == 0:
         # Seed products matching frontend data
-        products = [
-            models.Product(name='Rascador Deluxe Premium', price=45990, category='Muebles', image_url='https://images.unsplash.com/photo-1545249390-6bdfa286032f?q=80&w=800&auto=format&fit=crop', description='Rascador de 3 niveles con hamaca y juguetes colgantes.'),
-            models.Product(name='Fuente de Agua Inteligente', price=32990, category='Alimentación', image_url='https://images.unsplash.com/photo-1571566882372-1598d88abd90?q=80&w=800&auto=format&fit=crop', description='Agua fresca y filtrada 24/7 para tu michi. Silenciosa y fácil de limpiar.'),
-            models.Product(name='Cama Iglú Acolchada', price=24990, category='Descanso', image_url='https://images.unsplash.com/photo-1592194996308-7b43878e84a6?q=80&w=800&auto=format&fit=crop', description='Refugio suave y cálido, perfecto para los días fríos.'),
-            models.Product(name='Juguete Láser Automático', price=15990, category='Juguetes', image_url='https://images.unsplash.com/photo-1615802187760-b610c1f59247?q=80&w=800&auto=format&fit=crop', description='Horas de diversión garantizada con patrones aleatorios.'),
-            models.Product(name='Mochila Transportadora Espacial', price=38990, category='Transporte', image_url='https://images.unsplash.com/photo-1598284693774-7049405d4546?q=80&w=800&auto=format&fit=crop', description='Lleva a tu gato a todas partes con estilo y seguridad.'),
-            models.Product(name='Pack Paté Gourmet x12', price=12990, category='Alimentación', image_url='https://images.unsplash.com/photo-1583337130417-3346a1be7dee?q=80&w=800&auto=format&fit=crop', description='Sabores surtidos: Salmón, Atún, Pollo y Pavo.')
+        products_data = [
+            {
+                "name": 'Rascador Deluxe Premium', 
+                "price": 45990, 
+                "category": 'Muebles', 
+                "image_url": 'https://images.unsplash.com/photo-1545249390-6bdfa286032f?q=80&w=800&auto=format&fit=crop', 
+                "description": 'Rascador de 3 niveles con hamaca y juguetes colgantes.',
+                "variations": [
+                    {"name": "Gris Ártico", "stock": 5},
+                    {"name": "Beige Arena", "stock": 3}
+                ]
+            },
+            {
+                "name": 'Fuente de Agua Inteligente', 
+                "price": 32990, 
+                "category": 'Alimentación', 
+                "image_url": 'https://images.unsplash.com/photo-1571566882372-1598d88abd90?q=80&w=800&auto=format&fit=crop', 
+                "description": 'Agua fresca y filtrada 24/7 para tu michi. Silenciosa y fácil de limpiar.',
+                "variations": [
+                    {"name": "Blanco Minimal", "stock": 10},
+                    {"name": "Azul Noche", "stock": 8}
+                ]
+            },
+            {
+                "name": 'Cama Iglú Acolchada', 
+                "price": 24990, 
+                "category": 'Descanso', 
+                "image_url": 'https://images.unsplash.com/photo-1592194996308-7b43878e84a6?q=80&w=800&auto=format&fit=crop', 
+                "description": 'Refugio suave y cálido, perfecto para los días fríos.',
+                "variations": [
+                    {"name": "Pequeña", "stock": 15},
+                    {"name": "Mediana", "stock": 10},
+                    {"name": "Grande", "stock": 5}
+                ]
+            },
+            {
+                "name": 'Juguete Láser Automático', 
+                "price": 15990, 
+                "category": 'Juguetes', 
+                "image_url": 'https://images.unsplash.com/photo-1615802187760-b610c1f59247?q=80&w=800&auto=format&fit=crop', 
+                "description": 'Horas de diversión garantizada con patrones aleatorios.',
+                "variations": [
+                    {"name": "Standard", "stock": 20}
+                ]
+            }
         ]
-        db.add_all(products)
+        
+        for p_data in products_data:
+            vars_data = p_data.pop("variations", [])
+            db_product = models.Product(**p_data)
+            db.add(db_product)
+            db.commit()
+            db.refresh(db_product)
+            for v_data in vars_data:
+                db_var = models.ProductVariation(**v_data, product_id=db_product.id)
+                db.add(db_var)
         db.commit()
 
 @app.post("/register", response_model=schemas.User)
@@ -181,10 +172,27 @@ def register(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     hashed_password = auth.get_password_hash(user.password)
-    new_user = models.User(email=user.email, hashed_password=hashed_password, full_name=user.full_name)
+    new_user = models.User(
+        email=user.email, 
+        hashed_password=hashed_password, 
+        first_name=user.first_name,
+        last_name=user.last_name,
+        cat_name=user.cat_name,
+        cat_breed=user.cat_breed
+    )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+    
+    # Create address if provided
+    if user.address:
+        db_address = models.UserAddress(
+            user_id=new_user.id,
+            address_line=user.address,
+            city=user.city or "Santiago",
+            region=user.region or "Metropolitana"
+        )
+        db.add(db_address)
     
     # Create configuration
     config = models.UserConfiguration(user_id=new_user.id)
@@ -207,7 +215,14 @@ def login(user: schemas.UserLogin, db: Session = Depends(database.get_db)):
 
 @app.get("/products", response_model=List[schemas.Product])
 def get_products(db: Session = Depends(database.get_db)):
-    return db.query(models.Product).all()
+    return db.query(models.Product).filter(models.Product.is_active == True).all()
+
+@app.get("/products/{product_id}", response_model=schemas.Product)
+def get_product(product_id: int, db: Session = Depends(database.get_db)):
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return product
 
 @app.post("/checkout")
 def checkout(
@@ -215,31 +230,40 @@ def checkout(
     db: Session = Depends(database.get_db),
     current_user: Optional[models.User] = Depends(auth.get_optional_current_user)
 ):
-    buy_order = str(uuid.uuid4())[:26]
-    session_id = str(uuid.uuid4())[:26]
-    
-    # Integración Transbank
-    tx = Transaction()
-    return_url = "http://localhost:3000/checkout/result"
-    
-    response = tx.create(buy_order, session_id, order_data.total_amount, return_url)
-    
-    new_order = models.Order(
-        total_amount=order_data.total_amount,
-        buy_order=buy_order,
-        session_id=session_id,
-        token_ws=response['token'],
-        user_id=current_user.id if current_user else None
-    )
-    db.add(new_order)
-    db.commit()
-    
-    return {"url": response['url'], "token": response['token']}
+    try:
+        buy_order = str(uuid.uuid4())[:26]
+        session_id = str(uuid.uuid4())[:26]
+        
+        # Standard Webpay Plus
+        return_url = "http://localhost:3000/checkout/result"
+        print(f"Starting Webpay Plus for amount: {order_data.total_amount}")
+        response = TransbankService.start_webpay_plus(buy_order, session_id, order_data.total_amount, return_url)
+        print(f"Webpay response: {response}")
+        
+        new_order = models.Order(
+            total_amount=order_data.total_amount,
+            buy_order=buy_order,
+            session_id=session_id,
+            token_ws=response['token'],
+            payment_type="webpay_plus",
+            user_id=current_user.id if current_user else None,
+            guest_email=order_data.guest_email if not current_user else None,
+            guest_address=order_data.guest_address if not current_user else None
+        )
+        db.add(new_order)
+        db.commit()
+        print(f"Order created with ID: {new_order.id}")
+        
+        return {"url": response['url'], "token": response['token']}
+    except Exception as e:
+        print(f"Checkout error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/checkout/confirm")
 def confirm_payment(token_ws: str, db: Session = Depends(database.get_db)):
-    tx = Transaction()
-    response = tx.commit(token_ws)
+    response = TransbankService.commit_webpay_plus(token_ws)
     
     order = db.query(models.Order).filter(models.Order.token_ws == token_ws).first()
     if order:
@@ -294,22 +318,76 @@ def get_user_orders(
 ):
     return db.query(models.Order).filter(models.Order.user_id == current_user.id).all()
 
-# --- Admin & Support Endpoints ---
-
 def check_admin(current_user: models.User = Depends(auth.get_current_user)):
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Admin privileges required")
     return current_user
 
 # Admin: Manage Products
+@app.get("/orders", response_model=List[schemas.Order])
+def get_all_orders(
+    db: Session = Depends(database.get_db),
+    admin: models.User = Depends(check_admin)
+):
+    return db.query(models.Order).order_by(models.Order.created_at.desc()).all()
+
+@app.put("/orders/{order_id}/status", response_model=schemas.Order)
+def update_order_status(
+    order_id: int,
+    status_update: schemas.OrderStatusUpdate,
+    db: Session = Depends(database.get_db),
+    admin: models.User = Depends(check_admin)
+):
+    order = db.query(models.Order).filter(models.Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    order.status = status_update.status
+    db.commit()
+    db.refresh(order)
+    return order
+
+@app.get("/stats/summary")
+def get_stats_summary(
+    db: Session = Depends(database.get_db),
+    admin: models.User = Depends(check_admin)
+):
+    total_sales = db.query(models.Order).filter(models.Order.status == "paid").sum(models.Order.total_amount) or 0
+    # Wait, sqlalchemy sum usage might be different
+    from sqlalchemy import func
+    total_sales = db.query(func.sum(models.Order.total_amount)).filter(models.Order.status == "paid").scalar() or 0
+    order_count = db.query(models.Order).count()
+    product_count = db.query(models.Product).count()
+    user_count = db.query(models.User).count()
+    
+    return {
+        "total_sales": total_sales,
+        "order_count": order_count,
+        "product_count": product_count,
+        "user_count": user_count
+    }
+
 @app.post("/products", response_model=schemas.Product)
 def create_product(
     product: schemas.ProductCreate,
     db: Session = Depends(database.get_db),
     admin: models.User = Depends(check_admin)
 ):
-    db_product = models.Product(**product.dict())
+    product_data = product.dict()
+    variations_data = product_data.pop("variations", [])
+    images_data = product_data.pop("images", [])
+    db_product = models.Product(**product_data)
     db.add(db_product)
+    db.commit()
+    db.refresh(db_product)
+    
+    for var_data in variations_data:
+        db_var = models.ProductVariation(**var_data, product_id=db_product.id)
+        db.add(db_var)
+    
+    for img_data in images_data:
+        db_img = models.ProductImage(**img_data, product_id=db_product.id)
+        db.add(db_img)
+    
     db.commit()
     db.refresh(db_product)
     return db_product
@@ -325,8 +403,24 @@ def update_product(
     if not db_product:
         raise HTTPException(status_code=404, detail="Product not found")
     
-    for key, value in product.dict().items():
+    product_data = product.dict()
+    variations_data = product_data.pop("variations", [])
+    images_data = product_data.pop("images", [])
+    
+    for key, value in product_data.items():
         setattr(db_product, key, value)
+    
+    # Update variations
+    db.query(models.ProductVariation).filter(models.ProductVariation.product_id == product_id).delete()
+    for var_data in variations_data:
+        db_var = models.ProductVariation(**var_data, product_id=product_id)
+        db.add(db_var)
+    
+    # Update images
+    db.query(models.ProductImage).filter(models.ProductImage.product_id == product_id).delete()
+    for img_data in images_data:
+        db_img = models.ProductImage(**img_data, product_id=product_id)
+        db.add(db_img)
     
     db.commit()
     db.refresh(db_product)

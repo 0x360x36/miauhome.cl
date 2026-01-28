@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
-from .database import Base
+from database import Base
 import datetime
 
 class User(Base):
@@ -8,8 +8,10 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
-    full_name = Column(String)
-    google_id = Column(String, unique=True, nullable=True)
+    first_name = Column(String)
+    last_name = Column(String)
+    cat_name = Column(String, nullable=True)
+    cat_breed = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
 
@@ -44,9 +46,32 @@ class Product(Base):
     name = Column(String, index=True)
     description = Column(String)
     price = Column(Integer)
-    image_url = Column(String)
+    image_url = Column(String) # Main image
     category = Column(String) # 'cat_food', 'toys', etc.
     stock = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+
+    images = relationship("ProductImage", back_populates="product", cascade="all, delete-orphan")
+    variations = relationship("ProductVariation", back_populates="product", cascade="all, delete-orphan")
+
+class ProductImage(Base):
+    __tablename__ = "product_images"
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"))
+    url = Column(String)
+
+    product = relationship("Product", back_populates="images")
+
+class ProductVariation(Base):
+    __tablename__ = "product_variations"
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"))
+    name = Column(String) # e.g. '3kg', '10kg' or 'Red', 'Blue'
+    variation_type = Column(String, nullable=True) # e.g. 'color', 'size', 'shape'
+    price = Column(Integer, nullable=True) # Optional override
+    stock = Column(Integer, default=0)
+
+    product = relationship("Product", back_populates="variations")
 
 class Discount(Base):
     __tablename__ = "discounts"
@@ -70,13 +95,16 @@ class SupportTicket(Base):
 class Order(Base):
     __tablename__ = "orders"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     total_amount = Column(Integer)
     status = Column(String, default="pending") # pending, paid, failed
     buy_order = Column(String, unique=True)
     session_id = Column(String)
-    token_ws = Column(String, nullable=True)
+    token_ws = Column(String, nullable=True) # For Webpay Plus
+    payment_type = Column(String, default="webpay_plus")
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    guest_email = Column(String, nullable=True)
+    guest_address = Column(String, nullable=True)
 
     user = relationship("User", back_populates="orders")
 
@@ -94,7 +122,9 @@ class CartItem(Base):
     id = Column(Integer, primary_key=True, index=True)
     cart_id = Column(Integer, ForeignKey("carts.id"))
     product_id = Column(Integer, ForeignKey("products.id"))
+    variation_id = Column(Integer, ForeignKey("product_variations.id"), nullable=True)
     quantity = Column(Integer, default=1)
 
     cart = relationship("Cart", back_populates="items")
     product = relationship("Product")
+    variation = relationship("ProductVariation")

@@ -1,13 +1,14 @@
 "use client";
 
 import Link from 'next/link';
-import { ShoppingCart, Menu, PawPrint, LogOut } from 'lucide-react';
+import { ShoppingCart, Menu, PawPrint, LogOut, User } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useCart } from '@/context/CartContext';
-import { GoogleLogin } from '@react-oauth/google';
+import { useAuth } from '@/context/AuthContext';
 
 export function Navbar() {
-  const { cart, user, loginWithGoogle, logout } = useCart();
+  const { cart } = useCart();
+  const { user, logout } = useAuth();
   const cartItemCount = cart.reduce((acc, item) => acc + item.quantity, 0);
 
   return (
@@ -36,36 +37,33 @@ export function Navbar() {
         </nav>
 
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" className="hidden md:flex relative group">
-            <ShoppingCart className="h-5 w-5" />
-            <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] text-white">
-              {cartItemCount}
-            </span>
-            <span className="sr-only">Carrito</span>
-          </Button>
+          <Link href="/checkout">
+            <Button variant="ghost" size="sm" className="hidden md:flex relative group">
+              <ShoppingCart className="h-5 w-5" />
+              <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] text-white">
+                {cartItemCount}
+              </span>
+              <span className="sr-only">Carrito</span>
+            </Button>
+          </Link>
           
           {user ? (
              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium hidden md:inline-block">Hola, {user.full_name}</span>
+                <Link href="/profile" className="flex items-center gap-2 hover:bg-gray-100 p-2 rounded-full transition-colors">
+                    <span className="text-sm font-medium hidden md:inline-block">Hola, {user.first_name}</span>
+                    <div className="bg-primary/10 p-1.5 rounded-full">
+                        <User className="h-5 w-5 text-primary" />
+                    </div>
+                </Link>
                 <Button variant="ghost" size="sm" onClick={logout} title="Cerrar sesión">
                     <LogOut className="h-5 w-5" />
                 </Button>
              </div>
           ) : (
              <div className="hidden md:block">
-                 <GoogleLogin
-                    onSuccess={credentialResponse => {
-                        if (credentialResponse.credential) {
-                            loginWithGoogle(credentialResponse.credential);
-                        }
-                    }}
-                    onError={() => {
-                        console.log('Login Failed');
-                    }}
-                    useOneTap
-                    type="icon"
-                    shape="circle"
-                 />
+                 <Link href="/auth/login">
+                    <Button>Iniciar Sesión</Button>
+                 </Link>
              </div>
           )}
 

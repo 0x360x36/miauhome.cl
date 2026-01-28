@@ -36,6 +36,20 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# ignore env files anywhere in the project
+**/.env
+**/.env.local
+**/.env.*
+
+# ignore node_modules in any subdirectory
+**/node_modules/
+
+# next.js / build artifacts in any subdir
+**/.next/
+**/out/
+**/dist/
+**/build/
+
 # vercel
 .vercel
 

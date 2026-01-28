@@ -3,6 +3,35 @@ from typing import Optional, List
 import datetime
 
 # Product Schema
+class ProductImageBase(BaseModel):
+    url: str
+
+class ProductImageCreate(ProductImageBase):
+    pass
+
+class ProductImage(ProductImageBase):
+    id: int
+    product_id: int
+
+    class Config:
+        from_attributes = True
+
+class ProductVariationBase(BaseModel):
+    name: str
+    variation_type: Optional[str] = None
+    price: Optional[int] = None
+    stock: int = 0
+
+class ProductVariationCreate(ProductVariationBase):
+    pass
+
+class ProductVariation(ProductVariationBase):
+    id: int
+    product_id: int
+
+    class Config:
+        from_attributes = True
+
 class ProductBase(BaseModel):
     name: str
     description: str
@@ -10,15 +39,19 @@ class ProductBase(BaseModel):
     image_url: str
     category: str
     stock: int = 0
+    is_active: bool = True
 
 class ProductCreate(ProductBase):
-    pass
+    variations: List[ProductVariationCreate] = []
+    images: List[ProductImageCreate] = []
 
 class Product(ProductBase):
     id: int
+    variations: List[ProductVariation] = []
+    images: List[ProductImage] = []
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Discount Schema
 class DiscountBase(BaseModel):
@@ -33,7 +66,7 @@ class DiscountCreate(DiscountBase):
 class Discount(DiscountBase):
     id: int
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Support Ticket Schema
 class SupportTicketBase(BaseModel):
@@ -49,7 +82,7 @@ class SupportTicket(SupportTicketBase):
     status: str
     created_at: datetime.datetime
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # User Configuration Schema
 class UserConfigurationBase(BaseModel):
@@ -60,7 +93,7 @@ class UserConfiguration(UserConfigurationBase):
     id: int
     user_id: int
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # User Address Schema
 class UserAddressBase(BaseModel):
@@ -72,7 +105,7 @@ class UserAddress(UserAddressBase):
     id: int
     user_id: int
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class UserAddressCreate(UserAddressBase):
     pass
@@ -83,21 +116,35 @@ class Order(BaseModel):
     total_amount: int
     status: str
     buy_order: str
+    payment_type: str
     created_at: datetime.datetime
+    guest_email: Optional[str] = None
+    guest_address: Optional[str] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class OrderCreate(BaseModel):
     total_amount: int
+    guest_email: Optional[str] = None
+    guest_address: Optional[str] = None
+
+class OrderStatusUpdate(BaseModel):
+    status: str
 
 # User Schemas
 class UserBase(BaseModel):
     email: str
-    full_name: str
+    first_name: str
+    last_name: str
+    cat_name: Optional[str] = None
+    cat_breed: Optional[str] = None
 
 class UserCreate(UserBase):
     password: str
+    address: Optional[str] = None
+    city: Optional[str] = None
+    region: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: str
@@ -113,13 +160,11 @@ class User(UserBase):
     support_tickets: List[SupportTicket] = []
 
     class Config:
-        orm_mode = True
-
-class GoogleLogin(BaseModel):
-    token: str
+        from_attributes = True
 
 class CartItemBase(BaseModel):
     product_id: int
+    variation_id: Optional[int] = None
     quantity: int
 
 class CartItemCreate(CartItemBase):
@@ -128,13 +173,14 @@ class CartItemCreate(CartItemBase):
 class CartItem(CartItemBase):
     id: int
     product: Product
+    variation: Optional[ProductVariation] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class Cart(BaseModel):
     id: int
     items: List[CartItem] = []
 
     class Config:
-        orm_mode = True
+        from_attributes = True

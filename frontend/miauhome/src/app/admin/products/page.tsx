@@ -136,7 +136,7 @@ export default function ProductsPage() {
               {filteredProducts.map((product) => (
                 <tr key={product.id} className="hover:bg-gray-50 transition-colors">
                   <td className="p-4 flex items-center gap-3">
-                    <img src={product.image_url} alt="" className="w-10 h-10 rounded-lg object-cover bg-gray-100" />
+                    <img src={product.image_url || null} alt="" className="w-10 h-10 rounded-lg object-cover bg-gray-100" />
                     <div className="font-medium text-gray-800">{product.name}</div>
                   </td>
                   <td className="p-4 text-gray-600">
